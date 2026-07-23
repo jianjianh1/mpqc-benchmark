@@ -1,0 +1,89 @@
+{
+  "units": "2010CODATA",
+  "molecule": {
+    "type": "Molecule",
+    "file_name": "/proj/perf-model-gpu-PG0/jianjian-alkanes-v3/xyz/ethane.xyz"
+  },
+  "obs": {
+    "type": "Basis",
+    "name": "cc-pvdz-f12",
+    "molecule": "$:molecule"
+  },
+  "dfbs": {
+    "type": "Basis",
+    "name": "aug-cc-pvdz-ri",
+    "molecule": "$:molecule"
+  },
+  "wfn_world": {
+    "molecule": "$:molecule",
+    "basis": "$:obs",
+    "df_basis": "$:dfbs"
+  },
+  "localizer": {
+    "type": "FBLocalizer",
+    "max_iter": "1000",
+    "convergence": "1e-05",
+    "wfn_world": "$:wfn_world"
+  },
+  "scf": {
+    "type": "DF-RHF",
+    "wfn_world": "$:wfn_world",
+    "localizer": "$:localizer"
+  },
+  "pno": {
+    "type": "PaoPnoRMP2",
+    "atoms": "$:atoms",
+    "wfn_world": "$:wfn_world",
+    "ref": "$:scf",
+    "unit_csv_tile_size": "true",
+    "use osvs": "true",
+    "tpno": "1e-7",
+    "tosv": "1e-9",
+    "tC": "1e-4",
+    "ldf integrals": "true",
+    "Fast E": "false",
+    "Fast Zir": "false",
+    "Fast Zia": "false",
+    "tSpao": "1e-8",
+    "tIA": "7e-4",
+    "tIX": "1e-4",
+    "tIJ": "1e-6",
+    "tRS": "1e-9",
+    "tFIJ": "1e-4"
+  },
+  "wfn": {
+    "type": "CCk",
+    "csv": {
+      "provider": "$:pno",
+      "tIJ": "3e-05"
+    },
+    "method": "df",
+    "wfn_world": "$:wfn_world",
+    "molecule": "$:molecule",
+    "ref": "$:scf",
+    "localizer": "$:localizer",
+    "occ_tile_size": "4",
+    "uocc_tile_size": "16",
+    "frozen_core": "true",
+    "export_orbitals": "true",
+    "max_iter": "3",
+    "seq_opt": "true",
+    "cache_imeds": "true",
+    "k": "2",
+    "sequant": {
+      "trace": {
+        "eval": "true",
+        "eval_level": "1"
+      }
+    },
+    "batch": {
+      "aux_target_size": "0"
+    }
+  },
+  "property": {
+    "type": "Energy",
+    "precision": "1e-07",
+    "wfn": "$:wfn",
+    "estimated_precision": "5e-07"
+  }
+}

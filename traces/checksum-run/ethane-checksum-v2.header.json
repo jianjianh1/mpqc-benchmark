@@ -1,0 +1,196 @@
+{
+  "log_path": "checksum-run/ethane-checksum-v2.log",
+  "mpqc_version": "4.0.0-beta.1",
+  "mpqc_revision": "1015cfe428824d2a01fb107fc4ca222947db2f91",
+  "machine": "Linux-5.15.0-168-generic-x86_64",
+  "start_time": "Fri Jul 10 05:43:41 2026 GMT",
+  "n_mpi": 0,
+  "n_threads": 11,
+  "input_json": {
+    "units": "2010CODATA",
+    "molecule": {
+      "type": "Molecule",
+      "file_name": "../../jianjian-alkanes-v3/xyz/ethane.xyz"
+    },
+    "obs": {
+      "type": "Basis",
+      "name": "cc-pvdz-f12",
+      "molecule": "$:molecule"
+    },
+    "dfbs": {
+      "type": "Basis",
+      "name": "aug-cc-pvdz-ri",
+      "molecule": "$:molecule"
+    },
+    "wfn_world": {
+      "molecule": "$:molecule",
+      "basis": "$:obs",
+      "df_basis": "$:dfbs"
+    },
+    "localizer": {
+      "type": "FBLocalizer",
+      "max_iter": "1000",
+      "convergence": "1e-05",
+      "wfn_world": "$:wfn_world"
+    },
+    "scf": {
+      "type": "DF-RHF",
+      "wfn_world": "$:wfn_world",
+      "localizer": "$:localizer"
+    },
+    "pno": {
+      "type": "PaoPnoRMP2",
+      "atoms": "$:atoms",
+      "wfn_world": "$:wfn_world",
+      "ref": "$:scf",
+      "unit_csv_tile_size": "true",
+      "use osvs": "true",
+      "tpno": "1e-7",
+      "tosv": "1e-9",
+      "tC": "1e-4",
+      "ldf integrals": "true",
+      "Fast E": "false",
+      "Fast Zir": "false",
+      "Fast Zia": "false",
+      "tSpao": "1e-8",
+      "tIA": "7e-4",
+      "tIX": "1e-4",
+      "tIJ": "1e-6",
+      "tRS": "1e-9",
+      "tFIJ": "1e-4"
+    },
+    "wfn": {
+      "type": "CCk",
+      "csv": {
+        "provider": "$:pno",
+        "tIJ": "3e-05"
+      },
+      "method": "df",
+      "wfn_world": "$:wfn_world",
+      "molecule": "$:molecule",
+      "ref": "$:scf",
+      "localizer": "$:localizer",
+      "occ_tile_size": "4",
+      "uocc_tile_size": "16",
+      "frozen_core": "true",
+      "export_orbitals": "true",
+      "max_iter": "3",
+      "seq_opt": "true",
+      "cache_imeds": "true",
+      "k": "2",
+      "sequant": {
+        "trace": {
+          "eval": "true",
+          "eval_level": "1"
+        }
+      },
+      "batch": {
+        "aux_target_size": "0"
+      }
+    },
+    "property": {
+      "type": "Energy",
+      "precision": "1e-07",
+      "wfn": "$:wfn",
+      "estimated_precision": "5e-07"
+    }
+  },
+  "bases": {
+    "OBS": {
+      "basis": "cc-pvdz-f12",
+      "tile_lo": 0,
+      "tile_hi": 8,
+      "elem_lo": 0,
+      "elem_hi": 114,
+      "n_tiles": 8,
+      "dim": 114,
+      "tile_size_min": 9,
+      "tile_size_max": 30,
+      "tile_size_mean": 14
+    },
+    "DF": {
+      "basis": "aug-cc-pvdz-ri",
+      "tile_lo": 0,
+      "tile_hi": 8,
+      "elem_lo": 0,
+      "elem_hi": 282,
+      "n_tiles": 8,
+      "dim": 282,
+      "tile_size_min": 23,
+      "tile_size_max": 72,
+      "tile_size_mean": 35
+    },
+    "Minimal": {
+      "basis": "",
+      "tile_lo": 0,
+      "tile_hi": 7,
+      "elem_lo": 2,
+      "elem_hi": 9,
+      "n_tiles": 7,
+      "dim": 7,
+      "tile_size_min": 14,
+      "tile_size_max": 15,
+      "tile_size_mean": 14
+    }
+  },
+  "index_spaces": {
+    "a": {
+      "dim": 105,
+      "_decl_instance": 101
+    },
+    "a↑": {
+      "dim": 10,
+      "_decl_instance": 102
+    },
+    "a↓": {
+      "dim": 10,
+      "_decl_instance": 103
+    },
+    "i": {
+      "dim": 7,
+      "_decl_instance": 104
+    },
+    "i↑": {
+      "dim": 10,
+      "_decl_instance": 105
+    },
+    "i↓": {
+      "dim": 10,
+      "_decl_instance": 106
+    },
+    "p": {
+      "dim": 114,
+      "_decl_instance": 107
+    },
+    "p↑": {
+      "dim": 20,
+      "_decl_instance": 108
+    },
+    "p↓": {
+      "dim": 20,
+      "_decl_instance": 109
+    },
+    "K": {
+      "dim": 282,
+      "_decl_instance": 110
+    },
+    "\\mu": {
+      "dim": 114,
+      "_decl_instance": 111
+    },
+    "\\tilde{\\mu}": {
+      "dim": 114,
+      "_decl_instance": 112
+    }
+  },
+  "summary_stats": {
+    "osv_per_pair_avg": 78.75,
+    "osv_off_diag_avg": 105.0,
+    "mp2_pairs_all": 49,
+    "mp2_pairs_unique": 28,
+    "pao_per_pair_avg": 112.89795918367346,
+    "pno_per_pair_avg": 44.57142857142857,
+    "csv_pairs_all": 49,
+    "csv_pairs_unique": 28
+  }
+}

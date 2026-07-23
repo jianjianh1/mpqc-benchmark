@@ -1,0 +1,7 @@
+# expr=f{μ̃_1;i_1}:N-N-S
+# kind=tile  array=flat
+# rank=2
+# shape=114,7
+# n_tiles_total=16
+# format=tile_index(2) tile_extent(2)
+# trailer n_tiles_stored=0

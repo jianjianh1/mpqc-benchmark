@@ -1,0 +1,202 @@
+Bootstrap: docker
+From: phusion/baseimage:noble-1.0.2
+
+# Apptainer recipe for building MPQC into a single SIF without docker.
+#
+# Build:
+#   bin/build-mpqc-sif.sh [...]
+# or directly:
+#   sudo apptainer build --tmpdir=/tmp --disable-cache \
+#        --build-arg MPQC_GIT_REF=master \
+#        [--build-arg GH_USER=...] [--build-arg GH_TOKEN=...] \
+#        [--build-arg MPQC_GIT_URL=...] \
+#        [--build-arg MADNESS_TASK_BACKEND=PaRSEC|Pthreads] \
+#        [--build-arg BUILD_JOBS=N] \
+#        OUTPUT.sif bin/mpqc.def
+#
+# This recipe mirrors the apt + cmake + ninja flow that
+# `bin/docker-build.sh` produces inline as a Dockerfile, but bypasses
+# docker entirely — apptainer pulls the base image from Docker Hub via
+# its own OCI client. The compile is identical to the docker path;
+# only the wrapping changes.
+#
+# Source-of-truth for apt deps / cmake flags / install layout:
+# `bin/docker-build.sh:120-189` (upstream). Keep this file in sync with
+# that on substantive changes.
+#
+# A note on the three `apt-get clean && rm -rf /var/lib/apt/lists/*` calls
+# in %post: the upstream Dockerfile pairs each apt-install block with a
+# `rm -rf … /tmp/* /var/tmp/*`. We deliberately narrowed those wipes —
+# Apptainer bind-mounts the host's /tmp into the %post sandbox, so a
+# bulk `rm -rf /tmp/*` deletes the host's tempfiles AND trips `set -eu`
+# on the bind-mounted /proc, /sys, /dev mount points. Clearing only the
+# apt list cache captures the bulk of the SIF-size win and is safe.
+
+%arguments
+    MPQC_GIT_URL=https://github.com/jianjianh1/mpqc-fork.git
+    MPQC_GIT_REF=3bf3413a10
+    MADNESS_TASK_BACKEND=PaRSEC
+    BUILD_JOBS=
+    GH_USER=
+    GH_TOKEN=
+    LLVM_VERSION=21
+    SEQUANT_PATCH_DIR=
+
+%post
+    # Apptainer runs %post with /bin/sh (dash on Ubuntu), so use
+    # POSIX-only options. `set -eu` errors on failure / undefined
+    # vars; pipefail is bash-only and isn't needed here (we don't
+    # rely on pipe-stage exit codes for correctness).
+    set -eu
+
+    # 1. Refresh OS + apt prereqs (mirror bin/docker-build.sh:138-147).
+    apt-get update
+    apt-get upgrade -y -o Dpkg::Options::="--force-confold"
+    apt-get install -y sudo cmake ninja-build git wget gnupg \
+                       software-properties-common \
+                       libboost-all-dev \
+                       libopenmpi-dev openmpi-bin \
+                       libopenblas-dev libeigen3-dev \
+                       doxygen \
+                       python3 python3-pip python3-numpy python3-dev python3-pytest
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+    # 2. clang-{{ LLVM_VERSION }} from apt.llvm.org (mirror :149-155).
+    mkdir -p /etc/apt/keyrings
+    wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/llvm.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-{{ LLVM_VERSION }} main" \
+        > /etc/apt/sources.list.d/llvm.list
+    apt-get update
+    apt-get install -y \
+        clang-{{ LLVM_VERSION }} \
+        clang-tools-{{ LLVM_VERSION }} \
+        libomp-{{ LLVM_VERSION }}-dev
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+    # 3. Non-root user (passwordless sudo for runtime; matches :157-158).
+    useradd -m -s /bin/bash mpqc
+    echo 'mpqc ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/mpqc
+
+    # 4. Clone the MPQC repo. If GH_TOKEN is supplied, inject
+    #    basic-auth into the clone URL; otherwise clone anonymously.
+    #
+    # Apptainer's `{{ VAR }}` placeholders are TEXTUALLY substituted
+    # into the rendered %post script before the shell parses it, so
+    # the build-arg value is treated as raw script text. We park each
+    # value in a single-quoted shell var (`_FOO='{{ FOO }}'`), then
+    # use shell parameter expansion to build the clone URL — no sed,
+    # so `,`, `&`, and `\` in the value are safe. The remaining
+    # restriction is that the values themselves must not contain `'`
+    # (would close the surrounding quote and inject shell);
+    # `bin/build-mpqc-sif.sh` enforces this at the wrapper.
+    cd /home/mpqc
+    _URL='{{ MPQC_GIT_URL }}'
+    _USER='{{ GH_USER }}'
+    _TOKEN='{{ GH_TOKEN }}'
+    _REF='{{ MPQC_GIT_REF }}'
+    if [ -n "$_TOKEN" ]; then
+        case "$_URL" in
+            https://*)
+                CLONE_URL="https://${_USER}:${_TOKEN}@${_URL#https://}"
+                ;;
+            *)
+                echo "[mpqc.def] GH_TOKEN set but MPQC_GIT_URL is not https:// — cloning unauthenticated" >&2
+                CLONE_URL="$_URL"
+                ;;
+        esac
+    else
+        CLONE_URL="$_URL"
+    fi
+    # Scratch fix (2026-07-21, not for upstream): a file:// CLONE_URL
+    # pointing at a host-bind-mounted, host-user-owned directory (e.g. a
+    # local mirror under --tmpdir) trips git's dubious-ownership check
+    # here, since %post runs as root — the UID doesn't match the
+    # bind-mounted directory's on-disk owner. Only relevant for local
+    # file:// sources; harmless no-op otherwise.
+    git config --global --add safe.directory '*'
+    git clone "$CLONE_URL" mpqc
+    cd mpqc
+    git checkout "$_REF"
+    # Record the exact commit we're building (visible later via
+    # `apptainer inspect SIF --runscript` won't show this, but the
+    # build log carries it).
+    echo "[mpqc.def] building commit: $(git log -1 --oneline)"
+
+    # 5. Configure (mirrors :166 + the MADNESS_TASK_BACKEND addition
+    #    that the captured-trace runs require).
+    _BACKEND='{{ MADNESS_TASK_BACKEND }}'
+    # Optional override: point CMake's FetchContent at a locally-patched
+    # SeQuant checkout instead of fetching the pinned upstream tag —
+    # used for the one-off value-checksum trace patch (see
+    # traces/README or the sanity-check plan for context). Apptainer
+    # bind-mounts the host's --tmpdir (default /tmp) into this %post
+    # sandbox, so SEQUANT_PATCH_DIR must be a path under that tmpdir,
+    # not an arbitrary host path. Empty (the default) leaves the normal
+    # FindOrFetchSeQuant.cmake fetch-from-GitHub behavior untouched.
+    _SEQUANT_PATCH_DIR='{{ SEQUANT_PATCH_DIR }}'
+    SEQUANT_PATCH_FLAG=""
+    if [ -n "$_SEQUANT_PATCH_DIR" ]; then
+        if [ ! -d "$_SEQUANT_PATCH_DIR" ]; then
+            echo "ERROR: SEQUANT_PATCH_DIR=$_SEQUANT_PATCH_DIR not visible inside the build sandbox (must be under --tmpdir)" >&2
+            exit 1
+        fi
+        SEQUANT_PATCH_FLAG="-DFETCHCONTENT_SOURCE_DIR_SEQUANT=$_SEQUANT_PATCH_DIR"
+        echo "[mpqc.def] using patched local SeQuant checkout: $_SEQUANT_PATCH_DIR"
+    fi
+    cmake -S . -B build -G Ninja \
+          -DMADNESS_TASK_BACKEND="$_BACKEND" \
+          -DCMAKE_CXX_COMPILER=clang++-{{ LLVM_VERSION }} \
+          -DCMAKE_C_COMPILER=clang-{{ LLVM_VERSION }} \
+          -DCMAKE_INSTALL_PREFIX=/home/mpqc/install \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DMPQC_DOC=ON \
+          -DSEQUANT_EVAL_TRACE=ON \
+          -DSEQUANT_TESTS=OFF \
+          ${SEQUANT_PATCH_FLAG:+"$SEQUANT_PATCH_FLAG"}
+
+    # 6. Strip nested .git left behind by CMake FetchContent so they
+    #    don't bloat the SIF (the runtime container has no use for them).
+    find build/_deps -name .git -type d -exec rm -rf {} +
+    rm -rf .git
+
+    # 7. Build + install. BUILD_JOBS empty → ninja picks its own
+    #    parallelism; pass -jN to cap. We validate that BUILD_JOBS is
+    #    a positive integer (or empty) so that whitespace / garbage
+    #    in the build-arg fails fast instead of silently becoming a
+    #    no-op `-j ` token or, worse, a `-jrm` if the value starts
+    #    with letters.
+    _JOBS='{{ BUILD_JOBS }}'
+    case "$_JOBS" in
+        '') JOBS_FLAG="" ;;
+        # Reject anything containing a non-digit character, or a leading
+        # zero (0, 00, 0012, ...) — shell glob patterns have no way to
+        # express "one or more digits" via repetition of a character
+        # class ([1-9][0-9]* means "one digit 1-9, then ANY characters",
+        # not "then more digits" — [0-9]* is a glob wildcard, not a regex
+        # quantifier — so it wrongly accepted garbage like "12a" or
+        # "16;rm"). Reject-first is the only reliable way to express this
+        # in POSIX shell case patterns.
+        *[!0-9]*|0|0*)
+            echo "ERROR: BUILD_JOBS must be a positive integer (got: '$_JOBS')" >&2
+            exit 1
+            ;;
+        *) JOBS_FLAG="-j$_JOBS" ;;
+    esac
+    cmake --build build --target mpqc ${JOBS_FLAG:+"$JOBS_FLAG"}
+    cmake --build build --target install ${JOBS_FLAG:+"$JOBS_FLAG"}
+
+    # 8. Final cleanup. Ownership flip mirrors :186.
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+    chown -R mpqc:mpqc /home/mpqc/install
+
+%environment
+    export PATH=/home/mpqc/install/bin:$PATH
+    export LD_LIBRARY_PATH=/home/mpqc/install/lib:${LD_LIBRARY_PATH:-}
+
+%runscript
+    exec /home/mpqc/install/bin/mpqc "$@"
+
+%labels
+    org.opencontainers.image.source https://github.com/ValeevGroup/mpqc4
+    org.opencontainers.image.description "MPQC4 single-binary container, built from a configurable git ref via Apptainer."

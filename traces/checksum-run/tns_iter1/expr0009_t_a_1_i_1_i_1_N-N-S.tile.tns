@@ -1,0 +1,8 @@
+# expr=t{a_1<i_1>;i_1}:N-N-S
+# kind=tile  array=tot
+# rank=1
+# rank_note=outer only; inner is reported as a single extent column
+# outer_shape=7
+# n_outer_tiles_total=2
+# format=outer_tile_idx(1) outer_tile_extent(1) outer_elem_idx_global(1) inner_dense_volume(1)
+# trailer n_outer_tiles_stored=0  n_inner_nonzero_elements=0

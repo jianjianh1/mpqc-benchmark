@@ -1,0 +1,7 @@
+# expr=t{a_1<i_1>;i_1}:N-N-S
+# kind=coo  array=tot
+# rank=1
+# rank_note=outer modes; inner contributes 1 extra mode = local PNO/OSV index
+# outer_shape=7
+# format=outer_elem_idx_global(1) inner_local_idx(1) value(1)
+# trailer n_stored_elements=0  nnz=0
