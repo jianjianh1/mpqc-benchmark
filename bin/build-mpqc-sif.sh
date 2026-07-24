@@ -22,7 +22,7 @@
 #   -h, --help            print this help and exit
 #
 # Args:
-#   GIT_REF   git ref (branch / tag / SHA) to build (default: 2e827f5ab3,
+#   GIT_REF   git ref (branch / tag / SHA) to build (default: 93b27e3743,
 #             the fork commit with per-residual SumInplace timing + a
 #             whole-residual checksum line)
 #   TAG       label used in default --output filename (default: latest)
@@ -89,7 +89,7 @@ Options:
   -h, --help            print this help and exit
 
 Args:
-  GIT_REF   git ref (branch / tag / SHA) to build (default: 2e827f5ab3,
+  GIT_REF   git ref (branch / tag / SHA) to build (default: 93b27e3743,
             the fork commit with per-residual SumInplace timing + a
             whole-residual checksum line)
   TAG       label used in default --output filename (default: latest)
@@ -139,7 +139,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-REF="${REF:-2e827f5ab3}"
+REF="${REF:-93b27e3743}"
 TAG="${TAG:-latest}"
 OUTPUT="${OUTPUT:-./mpqc-${TAG}.sif}"
 

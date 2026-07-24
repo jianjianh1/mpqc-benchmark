@@ -34,7 +34,7 @@ From: phusion/baseimage:noble-1.0.2
 
 %arguments
     MPQC_GIT_URL=https://github.com/jianjianh1/mpqc-fork.git
-    MPQC_GIT_REF=2e827f5ab3
+    MPQC_GIT_REF=93b27e3743
     MADNESS_TASK_BACKEND=PaRSEC
     BUILD_JOBS=
     GH_USER=
