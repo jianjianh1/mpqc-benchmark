@@ -23,14 +23,23 @@ ethane leaf/reference data this specific comparison needs.
 ## Build the instrumented SIF
 
 ```bash
-bin/build-mpqc-sif.sh          # defaults to jianjianh1/mpqc-fork@3bf3413a10
+bin/build-mpqc-sif.sh          # defaults to jianjianh1/mpqc-fork@93593706ed
 ```
 
-That pinned commit is the first one where `cck.ipp`'s
-`evaluate_csv_closedshell(R)` emits a real per-residual timing line
-(`Eval | SumInplace | <ns>ns | R=<r> | n_terms=<n>`) on top of the
-generic SeQuant `Eval | ...` trace lines — this is what
-`traces/parse_mpqc_gap.py` parses. Requires Apptainer ≥ 1.5 and
+That pinned commit's `cck.ipp` (`evaluate_csv_closedshell(R)`) carries
+three additive, non-semantic instrumentation lines: `Eval | SumInplace |
+<ns>ns | R=<r> | n_terms=<n>` (the `+=` accumulation step only —
+`traces/parse_mpqc_gap.py` parses this, but it needs `sequant.trace.eval`
+tracing on to also see per-term costs, which carries real checksum
+overhead — see "Correctness vs. performance runs" below), `Eval |
+WholeResidualWallTime | <ns>ns | R=<r> | n_terms=<n>` (a trace-INDEPENDENT
+wall-clock timer around the whole real computation — use this one for
+performance, `traces/checksum-run/ethane-perf.json` + no trace needed),
+and `Eval | WholeResidualChecksum | R=<r> | checksum=nnz,sum,sumsq,max_abs`
+(a direct whole-residual checksum, parsed by
+`traces/extract_whole_residual_checksum.py` — MPQC never logs one
+itself; per-term row-summing turned out unreliable for T2). Requires
+Apptainer ≥ 1.5 and
 passwordless root (`sudo apptainer build`); see `bin/mpqc.def`'s header
 comment for the full flag reference. Build takes roughly 45-60 minutes
 and produces a ~2.9 GB `.sif` — **not** committed here; rebuild it
@@ -39,25 +48,49 @@ made further changes).
 
 ## Run against the real ethane data
 
-The exact input this investigation used is
-`traces/checksum-run/ethane-checksum-instrumented.json` (closed-shell
-CSV-CCSD, real ethane geometry/basis, `eval_level` trace tracing
-enabled). Run single-rank (multi-rank MPQC on Pthreads hangs at
-cross-rank collectives on at least this hardware — see the PaRSEC note
-below):
+There are two input configs — use the right one for the question you're
+asking, since `eval_level` tracing computes a real checksum on every
+intermediate step, genuine extra work that inflates timing:
+
+- **Correctness**: `traces/checksum-run/ethane-checksum-instrumented.json`
+  (`sequant.trace.eval_level: 1` — needed to get any per-term detail, and
+  the only way `Eval | WholeResidualChecksum` gets its data flowing
+  through the traced code paths).
+- **Performance**: `traces/checksum-run/ethane-perf.json` (same input,
+  `sequant.trace` block removed entirely) — use this for any timing
+  number; `Eval | WholeResidualWallTime` doesn't need tracing on at all.
+
+Run single-rank (multi-rank MPQC on Pthreads hangs at cross-rank
+collectives on at least this hardware — see the PaRSEC note below):
 
 ```bash
 sudo bin/run-mpqc-mpirun.sh \
   ./mpqc-latest.sif \
-  traces/checksum-run/ethane-checksum-instrumented.json \
+  traces/checksum-run/ethane-perf.json \
   -n 1 --log ethane-run.log
 ```
 
-Then extract each residual's real per-iteration cost:
+Then extract results:
 
 ```bash
+# whole-residual checksum (needs the correctness config, trace on)
+python3 traces/extract_whole_residual_checksum.py ethane-run.log
+# per-iteration real cost reconstructed from trace lines (also needs trace on)
 python3 traces/parse_mpqc_gap.py ethane-run.log
 ```
+
+Both tools default to **occurrence 2** of each `R=<r>` line — the state
+entering CCSD iteration 2 (T1≡0, T2 from one deterministic pass off the
+zero initial guess). This is the only iteration boundary safe to compare
+across independent MPQC invocations; later iterations' PNO amplitudes
+have a genuine run-to-run sign/gauge ambiguity on this molecule (ethane
+has real orbital degeneracies — 2 CH₃ groups) that makes T2 (not T1)
+numerically different — same nnz/sumsq magnitude, different sum/max_abs
+— between separate runs even with identical code and input. Confirmed
+directly this session: T2's checksum varied run-to-run across several
+otherwise-identical SIF rebuilds. Don't be alarmed if your own T2 sum
+doesn't match the reference table below exactly; T1 should always match
+closely.
 
 ## Known-correct reference values
 
@@ -87,6 +120,32 @@ top of MADNESS and was independently confirmed (same TiledArray
 commit, same workload) to be dramatically slower than Pthreads on this
 hardware, so none of that tuning transfers to MPQC's actual production
 configuration. Don't re-litigate this without a fresh measurement.
+
+**CPU affinity/thread-binding does NOT transfer either — tried, made
+things worse.** After finding that pinning `sequant-ta-repro`'s
+Pthreads/MADNESS process to physical cores (`taskset -c 0-7` +
+`MAD_NUM_THREADS=8`) gave a real ~20-24% win, the natural symmetric
+question was whether the same idea helps MPQC's own PaRSEC side —
+`bin/run-mpqc-mpirun.sh` sets `PARSEC_MCA_bind_threads=0` (PaRSEC's own
+hwloc-based core-pinning, disabled) alongside `PARSEC_MCA_runtime_num_
+cores=8` (thread-count cap only, no pinning). Tested both alternatives
+(3 trials each, `ethane-perf.json`, single rank) against the current
+default:
+- `PARSEC_MCA_bind_threads=1` (PaRSEC's own per-thread core pinning):
+  ~23% **slower** on both T1 and T2.
+- `taskset -c 0-7` wrapping the whole run (external CPU-set constraint,
+  PaRSEC's own dynamic balancing left on): no meaningful change (within
+  run-to-run noise).
+
+Read directly: PaRSEC already has its own topology-aware, dynamic
+work-stealing scheduler, and forcing static thread-to-core pinning
+prevents it from rebalancing away from naturally uneven load (this
+workload's per-occupied-pair PNO domains are genuinely ragged) — the
+current default (`bind_threads=0`, no external pinning) already looks
+like a real local optimum for PaRSEC on this workload, not an oversight.
+Correctness re-checked on both alternatives (T1 matched the reference
+exactly; T2 showed the same already-documented run-to-run gauge
+variability, not a new issue). Not adopting either change.
 
 ## Regenerating the SeQuant patch this compares against
 
